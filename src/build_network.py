@@ -245,14 +245,93 @@ class ResIN():
         ds = {}
         for e in self.g.edges(data=True):
             w = e[2]["weight"]
-            ds[(e[0],e[1])] = 1-w
+            ds[(e[0],e[1])] = 1/w
         nx.set_edge_attributes(self.g, ds, "distance")
     
 
 
 
+class BNA():
+    def __init__(self,
+                 df:pd.DataFrame,
+                 node_cols:list = []) -> None:
         
+        self.input_df = df
+        self.node_list = node_cols 
+        self.node_attrs = {}
+
+    def make_graph(self,
+                   alpha:float = .05,
+                   get_p:bool = True,
+                   remove_non_significant:bool = False,
+                   exclude_same_question:bool = True,
+                   print_:bool = False,
+                   square_corr:bool = False) -> None:
         
+        if get_p==False and remove_non_significant==True:
+            print("Warning: Setting remove_non_significant to False as get_p is False!")
+            remove_non_significant=False
+
+        
+        self.g = nx.Graph()
+        self.edge_weights = {}
+
+        count = 0 
+        for i, node_i in enumerate(self.node_list):
+            for j, node_j in enumerate(self.node_list):
+
+                if j <= i: # do not run the same couple twice
+                    continue 
+                
+                if print_:
+                    count += 1 
+                    l = len(self.ndoe_list)
+                    n_tot = l*(l-1)/2
+                    print(count,"/",n_tot, " = ", np.round(count/n_tot,decimals=2)*100, '%')
+                
+                if exclude_same_question:
+                    if node_i == node_j: # skip if they are the same question
+                        continue  
+                
+                # get the two columns 
+                c1 = self.input_df[node_i]
+                c2 = self.input_df[node_j]
+
+                (r,p) = corr_nan(c1, c2)
+                r = abs(r)
+
+                if remove_non_significant:
+                    condition = r > 0 and p < alpha
+                else:
+                    condition = r > 0  
+
+                if condition:
+                    if square_corr: 
+                        self.g.add_weighted_edges_from([(node_i,node_j,r**2)], weight="weight")
+                    else:
+                        self.g.add_weighted_edges_from([(node_i,node_j,r)],weight="weight")
+                    if get_p:
+                        self.g.add_weighted_edges_from([(node_i,node_j,p)],weight="p")
+                        sig = float(p<alpha) # Boolean are not accepted as edge weight
+                        self.g.add_weighted_edges_from([(node_i,node_j,sig)],weight="sig")
+                
+                self.edge_weights[(node_i, node_j)] = r 
+
+    def compute_covariates(self, 
+                           covariate_col:str) -> None:
+        
+        p_dict = {}
+        r_dict = {}
+        for node_col in self.node_list:
+            (p,r) = corr_nan(self.input_df[node_col], self.input_df[covariate_col])
+            p_dict[node_col] = p 
+            r_dict[node_col] = r
+        
+        nx.set_node_attributes(self.g, p_dict, f"corr_{covariate_col}")
+        nx.set_node_attributes(self.g, r_dict, f"sig_{covariate_col}")
+                
+
+
 
 
 
