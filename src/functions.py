@@ -131,7 +131,7 @@ def phi(x:Any, y:Any, w:Any=None, get_p:bool=False, weighted:bool=False) -> Any:
     
 
 def corr_nan(x,y):
-    # TODO: add docss
+    # get the pearson's correlation r for two arrays that potentially have nan values
     x = np.array(x)
     y = np.array(y)
     
