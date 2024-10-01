@@ -1,0 +1,215 @@
+---
+title: "ResIN_ANES_timeseries_1"
+author: "Us versus them"
+date: "2023-07-06"
+output: html_document
+---
+
+```{r import, include=FALSE, warning = false, message=FALSE}
+
+options(collapse_mask = "manip")
+rm(list = setdiff(ls(), lsf.str()))
+
+if(!require("pacman")) install.packages('pacman')
+library(pacman)
+p_load(ResIN)
+p_load(tidyverse)
+p_load(patchwork)
+p_load(qgraph)
+p_load(ggpubr)
+
+anes <- read.csv("anes_out.csv")
+
+node_covars <- c("lib_con", "pid", "egal_1", "egal_2", "auth_1", "auth_2", "auth_3", "auth_4", "rac_res_1", "rac_res_2", "rac_res_3", "rac_res_4", "ft_jews", "ft_blacks", "ft_whites", "ft_bis", "ft_lab" , "ft_lib" , "ft_con" , "ft_his" , "ft_dem" , "ft_poor" , "ft_rep" , "ft_asian" , "ft_congr" , "ft_gay" , "ft_immigr", "ft_chrfund" , "ft_fem" , "ft_mus" , "ft_chr" , "hw_whites" , "hw_blacks", "hw_his", "hw_asian")
+
+node_costats <- rep("mean", length(node_covars))
+
+anes_sub <- anes %>% dplyr::select("year", "gov_health", "guar_jobs", "abort", "def_spend", "aid_black", "spend_serv", node_covars)
+```
+
+```{r}
+
+anes_sub$aff_pola <- anes_sub$ft_dem - anes_sub$ft_rep
+
+
+anes_2020 <- anes_sub %>%  filter(year==2020) %>% select(!year)
+
+
+ResIN_out_strength <- anes_2020 %>% ResIN(node_vars = c("gov_health", "guar_jobs", "abort", "aid_black", "spend_serv"),
+                                          left_anchor = "abort_4", plot_whichstat = "Strength",  plot_responselabels = T, plot_ggplot = F,
+                                          color_palette = "Greens", plot_title = "ResIN: Strength centrality", seed = 22)
+
+
+ResIN_out_closeness <- anes_2020 %>% ResIN(node_vars = c("gov_health", "guar_jobs", "abort", "aid_black", "spend_serv"),
+                                          left_anchor = "abort_4", plot_whichstat = "Closeness",  plot_responselabels = T, plot_ggplot = F,
+                                          color_palette = "Reds", plot_title = "ResIN: Closeness centrality", seed = 22)
+
+
+ResIN_out_betweenness <- anes_2020 %>% ResIN(node_vars = c("gov_health", "guar_jobs", "abort", "aid_black", "spend_serv"),
+                                          left_anchor = "abort_4", plot_whichstat = "Betweenness",  plot_responselabels = T, plot_ggplot = F,
+                                          color_palette = "Blues", plot_title = "ResIN: Betweenness centrality", seed = 22)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+## Making BNA - graph
+bna_out <- anes_2020 %>%  select(c("gov_health", "guar_jobs", "abort", "aid_black", "spend_serv")) %>% cor_auto() %>% abs() %>% as.data.frame()
+diag(bna_out) <- 0
+
+bna_igraph <- igraph::graph_from_adjacency_matrix(as.matrix(bna_out), mode = "undirected", weighted = TRUE, diag = FALSE)
+bna_layout <- as.data.frame(prcomp(igraph::layout_nicely(bna_igraph))$x)
+
+bna_layout$node_names <- colnames(bna_out)
+colnames(bna_layout) <- c("x", "y", "node_names")
+
+bna_layout$y <- bna_layout$y*3
+bna_layout$x <- bna_layout$x*3.5
+
+node_frame <- bna_layout
+node_frame$from <- node_frame$node_names
+
+bna_qgraph <- qgraph::qgraph(bna_out, DoNotPlot = TRUE, layout = "spring", labels = rownames(bna_out))
+
+node_net_stats <- qgraph::centrality_auto(bna_qgraph, weighted = TRUE)
+node_frame <- cbind(node_frame, node_net_stats$node.centrality)
+
+g <- igraph::as_data_frame(bna_igraph)
+g$from.x <- node_frame$x[match(g$from, node_frame$node_names)]
+g$from.y <- node_frame$y[match(g$from, node_frame$node_names)]
+g$to.x <- node_frame$x[match(g$to, node_frame$node_names)]
+g$to.y <- node_frame$y[match(g$to, node_frame$node_names)]
+
+edgelist_frame <- dplyr::left_join(g, node_frame, by = "from")
+
+BNA_ggplot <- ggplot2::ggplot()+ ggplot2::coord_fixed(ratio=1, x = c(min(edgelist_frame$x-1.5), max(edgelist_frame$x+1.5)),
+                y = c(min(edgelist_frame$y-1.5), max(edgelist_frame$y+1.5)))+
+  ggtitle("BNA: Node centrality (strength & closeness)")
+
+BNA_ggplot <- BNA_ggplot + ggplot2::geom_curve(ggplot2::aes(x = edgelist_frame$from.x, xend = edgelist_frame$to.x, y = edgelist_frame$from.y, yend = edgelist_frame$to.y, linewidth = edgelist_frame$weight), curvature = 0.2, color = "black", alpha = 0.4) +
+  ggplot2::scale_linewidth(range = c(0, 2))
+
+BNA_ggplot <- BNA_ggplot + ggplot2::geom_text(ggplot2::aes(x = node_frame$x, y = node_frame$y, label = node_frame$node_names, alpha = node_frame$Strength), size = 4) +
+  scale_alpha_continuous(range = c(0.6, 1.5))
+
+BNA_ggplot <- BNA_ggplot+
+    ggplot2::theme_classic()+
+    ggplot2::theme(axis.line = ggplot2::element_blank(), axis.text.x = ggplot2::element_blank(), axis.title.x = ggplot2::element_blank(),
+          axis.text.y = ggplot2::element_blank(), axis.title.y = ggplot2::element_blank(),
+          axis.ticks = ggplot2::element_blank(), panel.grid.major = ggplot2::element_blank(),
+          panel.grid.minor = ggplot2::element_blank(), legend.position = "none",
+          legend.text = ggplot2::element_blank(), plot.title = ggplot2::element_text(hjust = 0.5, size=12, vjust = -7.5), plot.margin = margin(-2,0,0,0))
+
+str_plot <- ResIN_out_strength$ResIN_ggplot + theme(legend.position = "none", plot.title = element_text(size = 12, vjust = -9), plot.margin = margin(-2,0,0,0))
+cl_plot <- ResIN_out_closeness$ResIN_ggplot + theme(legend.position = "none", plot.title = element_text(size = 12, vjust = -9), plot.margin = margin(-2,0,0,0))
+bet_plot <-  ResIN_out_betweenness$ResIN_ggplot + theme(legend.position = "none", plot.title = element_text(size = 12, vjust = -9), plot.margin = margin(-2,0,0,0))
+
+combi <- ggarrange(BNA_ggplot, str_plot, cl_plot, bet_plot, ncol = 1, nrow = 4)
+
+ggsave("combi.pdf",combi, device = "pdf", width = 8, height = 8)
+
+
+```
+
+A comparison of node strength centrality in ResIN can be indicative of the relative importance of different attitudes in either belief cluster. As seen in the top pane of Figure XX, defending abortion rights issue is much more central attitude to Liberals while the most important issues for conservatives deal with government sponsored healthcare and federal job guarantees. Such a result would appears surprising from the perspective of classic BNA, which would simply locate the guaranteed jobs item as the most central overall, remaining oblivious to the possibility that different attitudes can be more or less central to different ideological communities.
+
+One quirky feature of classic BNA is that strength and closeness centrality are equivalent for networks in which all shortest network paths are direct paths. Furthermore, betweenness-centrality is constant remains constant at zero across all nodes. Figure XX shows that this is the case if we investigate our running example network with classic BNA model. In ResIN, however, closeness and betweenness centrality not only indicate different belief system functions, they are also largely decoupled from equivalencies with strength centrality.
+
+Peeking at the middle pain in Figure XX, we note that nodes high closeness tend to lie in between the liberal and conservative clusters. These attitudes are typically moderate in nature and tend to be endorsed by people across the ideological aisle. However, not all beliefs that are well-connected to other beliefs actually help transmit information (or trust) across the most important communities within a belief network. In other words, only those attitudes which are also high in betweenness centrality likely act as gate-keepers or brokers between ideological sub-clusters. In a ResIN network, these nodes may be particularly relevant to de-polarization efforts. According to our model in the bottom pane of Figure XX, if you would like to find common ground between liberals and conservatives, your best bet would be to establish conversations about the general state of public services and about government healthcare. By contrast, you'd better avoid mentioning issues concerning abortion and race. The revealed patterns of co-endorsed beliefs suggest that liberals and conservatives may not agree on spending and health care any time soon, but their communities are (still) connected by sufficient moderate opinion holders that they might see reason and value in each others view-points.
+
+```{r first_net, include=FALSE, warning = false, message=FALSE}
+
+## 1988
+
+net_1988 <- ResIN::ResIN(anes_sub[anes_sub$year==1988, ], node_vars = c("gov_health","guar_jobs", "abort", "def_spend", "aid_black","spend_serv"),  network_stats=TRUE, node_covars = node_covars, node_costats = node_costats, remove_negative = TRUE)
+net_1988$node_frame$year <- 1988
+net_1988$edgelist_frame$year <- 1988
+
+if(net_1988$node_frame$x[net_1988$node_frame$node_names=="abort_1"] < 0 & net_1988$node_frame$x[net_1988$node_frame$node_names=="spend_serv_1"] < 0) {
+      net_1988$edgelist_frame$from.x <- -1*(net_1988$edgelist_frame$from.x)
+      net_1988$edgelist_frame$to.x <- -1*(net_1988$edgelist_frame$to.x)
+      net_1988$edgelist_frame$x <- -1*(net_1988$edgelist_frame$x)
+      net_1988$node_frame$x <- -1*(net_1988$node_frame$x)}
+
+net_1992 <- ResIN::ResIN(anes_sub[anes_sub$year==1992, ], node_vars = c("gov_health","guar_jobs", "abort", "def_spend", "aid_black","spend_serv"),  network_stats=TRUE, node_covars = node_covars, node_costats = node_costats)
+net_1992$node_frame$year <- 1992
+net_1992$edgelist_frame$year <- 1992
+
+if(net_1992$node_frame$x[net_1992$node_frame$node_names=="abort_1"] < 0 & net_1992$node_frame$x[net_1992$node_frame$node_names=="spend_serv_1"] < 0) {
+      net_1992$edgelist_frame$from.x <- -1*(net_1992$edgelist_frame$from.x)
+      net_1992$edgelist_frame$to.x <- -1*(net_1992$edgelist_frame$to.x)
+      net_1992$edgelist_frame$x <- -1*(net_1992$edgelist_frame$x)
+      net_1992$node_frame$x <- -1*(net_1992$node_frame$x)}
+
+net_1996 <- ResIN::ResIN(anes_sub[anes_sub$year==1996, ], node_vars = c("gov_health","guar_jobs", "abort", "def_spend", "aid_black","spend_serv"),  network_stats=TRUE, node_covars = node_covars, node_costats = node_costats)
+
+if(net_1996$node_frame$x[net_1996$node_frame$node_names=="abort_1"] < 0 & net_1996$node_frame$x[net_1996$node_frame$node_names=="spend_serv_1"] < 0) {
+      net_1996$edgelist_frame$from.x <- -1*(net_1996$edgelist_frame$from.x)
+      net_1996$edgelist_frame$to.x <- -1*(net_1996$edgelist_frame$to.x)
+      net_1996$edgelist_frame$x <- -1*(net_1996$edgelist_frame$x)
+      net_1996$node_frame$x <- -1*(net_1996$node_frame$x)}
+
+net_1996$node_frame$year <- 1996
+net_1996$edgelist_frame$year <- 1996
+
+net_2000 <- ResIN::ResIN(anes_sub[anes_sub$year==2000, ], node_vars = c("gov_health","guar_jobs", "abort", "def_spend", "aid_black","spend_serv"),  network_stats=TRUE, node_covars = node_covars, node_costats = node_costats)
+
+if(net_2000$node_frame$x[net_2000$node_frame$node_names=="abort_1"] < 0 & net_2000$node_frame$x[net_2000$node_frame$node_names=="spend_serv_1"] < 0) {
+      net_2000$edgelist_frame$from.x <- -1*(net_2000$edgelist_frame$from.x)
+      net_2000$edgelist_frame$to.x <- -1*(net_2000$edgelist_frame$to.x)
+      net_2000$edgelist_frame$x <- -1*(net_2000$edgelist_frame$x)
+      net_2000$node_frame$x <- -1*(net_2000$node_frame$x)}
+
+net_2000$node_frame$year <- 2000
+net_2000$edgelist_frame$year <- 2000
+
+net_2004 <- ResIN::ResIN(anes_sub[anes_sub$year==2004, ], node_vars = c("gov_health","guar_jobs", "abort", "def_spend", "aid_black","spend_serv"),  network_stats=TRUE, node_covars = node_covars, node_costats = node_costats)
+
+if(net_2004$node_frame$x[net_2004$node_frame$node_names=="abort_1"] < 0 & net_2004$node_frame$x[net_2004$node_frame$node_names=="spend_serv_1"] < 0) {
+      net_2004$edgelist_frame$from.x <- -1*(net_2004$edgelist_frame$from.x)
+      net_2004$edgelist_frame$to.x <- -1*(net_2004$edgelist_frame$to.x)
+      net_2004$edgelist_frame$x <- -1*(net_2004$edgelist_frame$x)
+      net_2004$node_frame$x <- -1*(net_2004$node_frame$x)}
+
+net_2004$node_frame$year <- 2004
+net_2004$edgelist_frame$year <- 2004
+
+net_2008 <- ResIN::ResIN(anes_sub[anes_sub$year==2008, ], node_vars = c("gov_health","guar_jobs", "abort", "def_spend", "aid_black","spend_serv"),  network_stats=TRUE, node_covars = node_covars, node_costats = node_costats)
+
+if(net_2008$node_frame$x[net_2008$node_frame$node_names=="abort_1"] < 0 & net_2008$node_frame$x[net_2008$node_frame$node_names=="spend_serv_1"] < 0) {
+      net_2008$edgelist_frame$from.x <- -1*(net_2008$edgelist_frame$from.x)
+      net_2008$edgelist_frame$to.x <- -1*(net_2008$edgelist_frame$to.x)
+      net_2008$edgelist_frame$x <- -1*(net_2008$edgelist_frame$x)
+      net_2008$node_frame$x <- -1*(net_2008$node_frame$x)}
+
+net_2008$node_frame$year <- 2008
+net_2008$edgelist_frame$year <- 2008
+
+net_2016 <- ResIN::ResIN(anes_sub[anes_sub$year==2016, ], node_vars = c("gov_health","guar_jobs", "abort", "def_spend", "aid_black","spend_serv"),  network_stats=TRUE, node_covars = node_covars, node_costats = node_costats)
+
+if(net_2016$node_frame$x[net_2016$node_frame$node_names=="abort_1"] < 0 & net_2016$node_frame$x[net_2016$node_frame$node_names=="spend_serv_1"] < 0) {
+      net_2016$edgelist_frame$from.x <- -1*(net_2016$edgelist_frame$from.x)
+      net_2016$edgelist_frame$to.x <- -1*(net_2016$edgelist_frame$to.x)
+      net_2016$edgelist_frame$x <- -1*(net_2016$edgelist_frame$x)
+      net_2016$node_frame$x <- -1*(net_2016$node_frame$x)}
+
+net_2016$node_frame$year <- 2016
+net_2016$edgelist_frame$year <- 2016
+
+net_2020 <- ResIN::ResIN(anes_sub[anes_sub$year==2020, ], node_vars = c("gov_health","guar_jobs", "abort", "def_spend", "aid_black","spend_serv"),  network_stats=TRUE, node_covars = node_covars, node_costats = node_costats)
+
+net_2020$node_frame$year <- 2020
+net_2020$edgelist_frame$year <- 2020
+
+if(net_2020$node_frame$x[net_2020$node_frame$node_names=="abort_1"] < 0 & net_2020$node_frame$x[net_2020$node_frame$node_names=="spend_serv_1"] < 0) {
+      net_2020$edgelist_frame$from.x <- -1*(net_2020$edgelist_frame$from.x)
+      net_2020$edgelist_frame$to.x <- -1*(net_2020$edgelist_frame$to.x)
+      net_2020$edgelist_frame$x <- -1*(net_2020$edgelist_frame$x)
+      net_2020$node_frame$x <- -1*(net_2020$node_frame$x)}
+
+anes_meta_edge <- rbind(net_1988$edgelist_frame, net_1992$edgelist_frame, net_1996$edgelist_frame, net_2000$edgelist_frame, net_2004$edgelist_frame, net_2008$edgelist_frame, net_2016$edgelist_frame, net_2020$edgelist_frame)
+anes_meta_node <- rbind(net_1988$node_frame, net_1992$node_frame, net_1996$node_frame, net_2000$node_frame, net_2004$node_frame, net_2008$node_frame, net_2016$node_frame, net_2020$node_frame)
+
+write.csv(anes_meta_edge, "anes_meta_edge.csv")
+write.csv(anes_meta_node, "anes_meta_node.csv")
+
+```
