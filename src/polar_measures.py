@@ -27,10 +27,10 @@ VAL_RANGES = {
     "aid_black":(1.0,7.0),
 }
 
-def get_binary_comm(resin:ResIN, comm_attr:str) -> List:
+def get_binary_comm(resin:ResIN, comm_attr:str, cutting_point=0) -> List:
     comms = [set(), set()]
     for n,v in resin.node_attrs[comm_attr].items():
-        if v > 0:
+        if v > cutting_point:
             comms[0].add(n)
         else:
             comms[1].add(n)
